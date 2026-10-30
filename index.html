@@ -410,18 +410,24 @@
     </div>
 
     <script>
-        // === FIREBASE CONFIGURATION ===
-        // Sesuaikan firebaseConfig di bawah dari Project Settings Firebase Console Anda
-        const firebaseConfig = {
-            databaseURL: "https://deferlohin-default-rtdb.firebaseio.com"
-        };
+        // === FIREBASE CONFIGURATION (LENGKAP) ===
+const firebaseConfig = {
+    apiKey: "AIzaSyCAFJdNZtnlPzONeosvQK-gPLQ_hRYI2hA",
+    authDomain: "deferlohin.firebaseapp.com",
+    databaseURL: "https://deferlohin-default-rtdb.firebaseio.com",
+    projectId: "deferlohin",
+    storageBucket: "deferlohin.firebasestorage.app",
+    messagingSenderId: "745966789273",
+    appId: "1:745966789273:android:a80ea99b10e93a52c00e08"
+};
 
-        // Initialize Firebase
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
-        const auth = firebase.auth();
-        const db = firebase.database();
+// Initialize Firebase
+if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+}
+const auth = firebase.auth();
+const db = firebase.database();
+
 
         const LIFETIME_TS = 99999999999999; 
 
