@@ -3,9 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>DPMods Admin - Final Fix</title>
+    <title>DPMods Admin - Secure Login</title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&family=JetBrains+Mono:wght[400]&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Firebase SDK (Compatibility Mode for Easy Script Access) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
     <style>
         /* === GLOBAL VARIABLES (Purple Glass Theme) === */
         :root {
@@ -42,6 +48,20 @@
             display: flex; flex-direction: column; min-height: 100vh;
         }
 
+        /* --- LOGIN SCREEN OVERLAY --- */
+        #loginScreen {
+            position: fixed; top:0; left:0; width:100vw; height:100vh;
+            background: var(--bg-color);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 20000;
+        }
+        .login-card {
+            width: 90%; max-width: 380px; padding: 30px;
+            background: var(--glass); backdrop-filter: var(--blur);
+            border: 1px solid var(--glass-border); border-radius: var(--radius);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+        }
+
         /* --- LAYOUT --- */
         .app-main { display: flex; flex-grow: 1; width: 100%; }
         .tab-wrapper { flex-grow: 1; padding: 0; }
@@ -58,6 +78,7 @@
         }
         .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
         .brand { font-size: 1.3rem; font-weight: 600; display: flex; align-items: center; gap: 10px; letter-spacing: 0.5px; }
+        .header-actions { display: flex; gap: 10px; }
         .action-btn { width: 42px; height: 42px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: var(--text); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
         .action-btn:active { transform: scale(0.95); }
 
@@ -142,7 +163,6 @@
 
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); display: none; justify-content: center; align-items: center; z-index: 10000; }
         
-        /* Animation for modal visibility */
         @keyframes modalPop { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
         
         .modal-box { 
@@ -162,7 +182,25 @@
         #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: var(--primary); color: white; padding: 12px 24px; border-radius: 50px; font-size: 0.9rem; font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 11000; opacity: 0; transition: 0.3s; pointer-events: none; white-space: nowrap; }
     </style>
 </head>
-<body onload="initApp()">
+<body>
+
+    <!-- SCREEN LOGIN OVERLAY -->
+    <div id="loginScreen">
+        <div class="login-card">
+            <div class="card-head" style="justify-content:center; font-size: 1.1rem;">
+                <i class="fas fa-shield-halved"></i> Admin Login
+            </div>
+            <div class="input-grp">
+                <label>Email Admin</label>
+                <input type="email" id="loginEmail" class="inp" placeholder="admin@example.com">
+            </div>
+            <div class="input-grp">
+                <label>Password</label>
+                <input type="password" id="loginPassword" class="inp" placeholder="••••••••">
+            </div>
+            <button class="m-btn m-save" style="width: 100%; margin-top: 10px;" onclick="handleLogin()">Login</button>
+        </div>
+    </div>
 
     <div id="toast">Notification</div>
     <div id="loader"><i class="fas fa-circle-notch fa-spin fa-2x"></i><span>Syncing Data...</span></div>
@@ -172,7 +210,10 @@
     <header>
         <div class="top-row">
             <div class="brand"><i class="fas fa-shield-halved"></i> DPMods Admin</div>
-            <div class="action-btn" onclick="loadData()"><i class="fas fa-sync-alt"></i></div>
+            <div class="header-actions">
+                <div class="action-btn" onclick="loadData()" title="Sync Data"><i class="fas fa-sync-alt"></i></div>
+                <div class="action-btn" onclick="handleLogout()" title="Logout" style="color: var(--c-expired);"><i class="fas fa-sign-out-alt"></i></div>
+            </div>
         </div>
         <div class="search-wrap">
             <div class="search-box">
@@ -369,15 +410,62 @@
     </div>
 
     <script>
-        // === CONFIGURATION (UPDATED) ===
-        const FIREBASE_URL = "https://deferlohin-default-rtdb.firebaseio.com/.json";
-        
-        // A very distant future timestamp (used to push Lifetime/Duration keys to the bottom of the expiry sort)
+        // === FIREBASE CONFIGURATION ===
+        // Sesuaikan firebaseConfig di bawah dari Project Settings Firebase Console Anda
+        const firebaseConfig = {
+            databaseURL: "https://deferlohin-default-rtdb.firebaseio.com"
+        };
+
+        // Initialize Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.database();
+
         const LIFETIME_TS = 99999999999999; 
 
         let DATA = { config:{}, security:{}, ui:{}, theme:{}, social_links:{}, promo:{}, update:{}, blacklist:[], keys:{} };
         let EDIT_ID = null;
         let SORT = 'default';
+
+        // === AUTHENTICATION LOGIC ===
+        auth.onAuthStateChanged((user) => {
+            if (user) {
+                document.getElementById('loginScreen').style.display = 'none';
+                loadData();
+            } else {
+                document.getElementById('loginScreen').style.display = 'flex';
+            }
+        });
+
+        async function handleLogin() {
+            const email = document.getElementById('loginEmail').value.trim();
+            const password = document.getElementById('loginPassword').value.trim();
+            
+            if (!email || !password) {
+                return toast("Isi Email & Password!", true);
+            }
+
+            document.getElementById('loader').style.display = 'flex';
+            try {
+                await auth.signInWithEmailAndPassword(email, password);
+                toast("Login Berhasil!");
+            } catch (error) {
+                toast("Login Gagal: " + error.message, true);
+            } finally {
+                document.getElementById('loader').style.display = 'none';
+            }
+        }
+
+        async function handleLogout() {
+            try {
+                await auth.signOut();
+                toast("Berhasil Logout");
+            } catch (error) {
+                toast("Logout Gagal: " + error.message, true);
+            }
+        }
 
         function toast(msg, err=false) {
             const t = document.getElementById('toast');
@@ -387,19 +475,18 @@
             setTimeout(()=> { t.style.opacity = 0; t.style.transform = 'translate(-50%, 0)'; }, 3000);
         }
 
-                // === API LOGIC ===
+        // === API LOGIC WITH AUTHENTICATED FIREBASE DB SDK ===
         async function loadData() {
+            if (!auth.currentUser) return;
+            
             document.getElementById('loader').style.display = 'flex';
             try {
-                const r = await fetch(FIREBASE_URL);
-                if (!r.ok) throw new Error("Firebase load failed");
+                const snapshot = await db.ref('/').once('value');
+                const content = snapshot.val();
 
-                const content = await r.json();
                 DATA = content || {};
                 if(!DATA.keys) DATA.keys = {};
 
-                // *** FIX BUG #1: APK menulis blacklist sebagai MAP {id: true} ***
-                // Konversi ke ARRAY untuk tampilan agar .join() tidak error
                 if (DATA.blacklist && typeof DATA.blacklist === 'object' && !Array.isArray(DATA.blacklist)) {
                     DATA.blacklist = Object.keys(DATA.blacklist);
                 }
@@ -415,7 +502,9 @@
             }
         }
 
-                async function saveAllData() {
+        async function saveAllData() {
+            if (!auth.currentUser) return toast("Sesi berakhir, silakan login ulang", true);
+
             // CONFIG
             if(!DATA.config) DATA.config = {};
             DATA.config.maintenance = document.getElementById('c_maint').value === 'true';
@@ -431,7 +520,7 @@
             if(!DATA.security) DATA.security = {};
             DATA.security.packageName = document.getElementById('s_pkg').value;
             DATA.security.killOnMismatch = document.getElementById('s_kill').value === 'true';
-            // *** FIX BUG #1: simpan blacklist sebagai MAP {id: true} — format yang dibaca APK ***
+            
             const bl = document.getElementById('s_bl').value.trim();
             const blList = bl ? bl.split('\n').map(x=>x.trim()).filter(x=>x) : [];
             DATA.blacklist = {};
@@ -481,17 +570,10 @@
             DATA.update.version = document.getElementById('up_ver').value;
             DATA.update.url = document.getElementById('up_url').value;
 
-            // Push to Firebase
+            // Push to Firebase via SDK
             document.getElementById('loader').style.display = 'flex';
             try {
-                // *** FIX BUG #2: tangkap response fetch ke variabel r ***
-                const r = await fetch(FIREBASE_URL, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(DATA, null, 2)
-                });
-                
-                if(!r.ok) throw new Error(r.statusText || "Firebase Error");
+                await db.ref('/').set(DATA);
                 toast("Changes Saved!");
             } catch(e) {
                 console.error(e);
@@ -504,13 +586,8 @@
         // === KEY HELPERS ===
 
         function getExpiryTimestamp(d) {
-            // Only 'date' type keys have a definite expiry date for sorting purposes
             if (d.type !== 'date' || !d.value) return LIFETIME_TS;
-
-            // Date keys return their timestamp (earlier date = lower timestamp)
             const expiry = new Date(d.value).getTime();
-            
-            // If the date is invalid, treat as lifetime for safety
             return isNaN(expiry) ? LIFETIME_TS : expiry;
         }
 
@@ -518,14 +595,13 @@
             if(d.type === 'lifetime') return 'dot-lifetime';
             if(d.type === 'duration') return 'dot-duration';
             
-            // Date Check
             if(d.type === 'date' && d.value) {
                 const exp = new Date(d.value).getTime();
                 const now = Date.now();
-                if(isNaN(exp)) return 'dot-valid'; // Treat invalid dates as valid by default
-                if(exp < now) return 'dot-expired'; // Expired
-                if(exp - now < 86400000 * 7) return 'dot-warning'; // Warning (less than 7 days)
-                return 'dot-valid'; // Valid
+                if(isNaN(exp)) return 'dot-valid'; 
+                if(exp < now) return 'dot-expired'; 
+                if(exp - now < 86400000 * 7) return 'dot-warning'; 
+                return 'dot-valid'; 
             }
             return 'dot-valid';
         }
@@ -561,8 +637,8 @@
             document.getElementById('ui_errorTitle').value = u.errorTitle || '';
             document.getElementById('ui_errorSub').value = u.errorSub || '';
             document.getElementById('ui_enableParticles').value = (u.enableParticles===true).toString();
-            document.getElementById('ui_particleColor1').value = u.particleColor1 || '#ff00ea'; // Defaulted to common value
-            document.getElementById('ui_particleColor2').value = u.particleColor2 || '#0000ff'; // Defaulted to common value
+            document.getElementById('ui_particleColor1').value = u.particleColor1 || '#ff00ea';
+            document.getElementById('ui_particleColor2').value = u.particleColor2 || '#0000ff';
             
             const soc = u.socials || {};
             document.getElementById('soc_telegram').value = (soc.telegram!==false).toString();
@@ -604,25 +680,21 @@
             
             let keys = Object.keys(DATA.keys).filter(k => k.toLowerCase().includes(query));
             
-            // --- Advanced Sorting Logic ---
             keys.sort((a, b) => {
                 const keyA = DATA.keys[a];
                 const keyB = DATA.keys[b];
 
                 if (SORT === 'az') {
-                    return a.localeCompare(b); // Alphabetical A-Z
+                    return a.localeCompare(b);
                 }
 
-                // For 'default' and 'exp' sort, prioritize expiry time
                 const expiryA = getExpiryTimestamp(keyA);
                 const expiryB = getExpiryTimestamp(keyB);
 
-                // Lower timestamp means sooner expiry (Expired=lowest, Warning=next, Valid=higher, Lifetime=Highest/LIFETIME_TS)
                 if (expiryA !== expiryB) {
                     return expiryA - expiryB;
                 }
 
-                // Secondary sort: Alphabetical for keys with the same expiry (e.g., all lifetime keys)
                 return a.localeCompare(b);
             });
 
@@ -777,10 +849,6 @@
             document.getElementById('sortLbl').textContent = t;
             toggleSort();
             renderKeys();
-        }
-
-        function initApp() {
-            loadData();
         }
     </script>
 </body>
